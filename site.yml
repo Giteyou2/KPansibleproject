@@ -45,6 +45,7 @@
       systemd:
         name: jenkins
         enabled: true
+    # ngrok 다운로드 및 설치(25-11-14 추가됨)
     - name: Download ngrok
       get_url:
         url: https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz
