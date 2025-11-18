@@ -143,7 +143,7 @@
                 - ZULIP_DOMAIN={{ inventory_hostname }}
                 - SETTINGS_EXTERNAL_HOST={{ inventory_hostname }}
                 - SETTINGS_ALLOWED_HOSTS=["{{ inventory_hostname }}","localhost","127.0.0.1"]
-
+    # docker compose를 설치하라는 문자가 뜰 수 있음 최신화 아직임
     - name: Start Zulip stack
       community.docker.docker_compose_v2:
         project_src: "{{ repo_dir }}"
