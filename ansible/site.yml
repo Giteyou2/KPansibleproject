@@ -45,17 +45,29 @@
       systemd:
         name: jenkins
         enabled: true
-    # ngrok 다운로드 및 설치(25-11-14 추가됨)
+    # ngrok 다운로드 및 설치 & ngrok파일 존재시 스킵함(25-11-18 추가됨)
+    # ngrok 존재 여부 확인
+    - name: Check if ngrok already exists
+      stat:
+        path: /usr/local/bin/ngrok
+      register: ngrok_file
+
+    # ngrok 다운로드 (파일이 없을 때만)
     - name: Download ngrok
       get_url:
         url: https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz
         dest: /tmp/ngrok-v3-stable-linux-amd64.tgz
         mode: "0644"
+      when: not ngrok_file.stat.exists
+
+    # ngrok 압축 해제 (파일이 없을 때만)
     - name: Unzip ngrok
       unarchive:
         src: /tmp/ngrok-v3-stable-linux-amd64.tgz
         dest: /usr/local/bin
         remote_src: yes
+      when: not ngrok_file.stat.exists
+
   handlers:
     - name: restart jenkins
       systemd:
