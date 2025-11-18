@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     triggers {
-        githubPush()   // GitHub Webhook
+        githubPush()
     }
 
     stages {
@@ -15,8 +15,8 @@ pipeline {
         stage('Run Ansible Playbook') {
             steps {
                 sh '''
-                cd playbooks
-                ansible-playbook -i ../inventory/hosts deploy.yml
+                cd ansible
+                ansible-playbook -i inventory.ini site.yml
                 '''
             }
         }
@@ -24,10 +24,11 @@ pipeline {
 
     post {
         success {
-            echo 'Ansible deployment completed successfully.'
+            echo 'Ansible playbook executed successfully.'
         }
         failure {
-            echo 'Deployment failed. Check the logs.'
+            echo 'Ansible playbook failed. Check logs.'
         }
     }
 }
+
