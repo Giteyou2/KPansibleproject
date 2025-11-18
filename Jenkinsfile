@@ -11,16 +11,17 @@ pipeline {
                 checkout scm
             }
         }
-
-        stage('Run Ansible Playbook') {
-            steps {
-                sh '''
-		echo ansible | su - ansible
-                cd /opt/infra/ansible/
-                ansible-playbook -i inventory.ini site.yml
-                '''
-            }
+    stage('Run Ansible Playbook') {
+        steps {
+            sh '''
+                sudo -u ansible bash -lc '
+                    cd /opt/infra/ansible && \
+                    ansible-playbook -i inventory.ini site.yml
+                '
+            '''
         }
+    }
+
     }
 
     post {
