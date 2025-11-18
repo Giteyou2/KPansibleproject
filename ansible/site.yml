@@ -222,4 +222,13 @@
         state: present
         pull: always
 
+- name: testing CI/CD with touch file
+  hosts: ansible_control
+  become: true
+  tasks:
+    - name: touch file
+      file:
+        path: /opt/infra/ansible/testfile.txt
+        state: touch
+        mode: '0644'
 
