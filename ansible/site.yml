@@ -1,0 +1,213 @@
+---
+###############################
+# 1) Ansible Control (Jenkins, ngrok)
+###############################
+- name: Setup Ansible control node with Jenkins + ngrok
+  hosts: ansible_control
+  become: true
+  vars:
+    jenkins_http_port: 8080
+  tasks:
+    - name: Install base tools & Java
+      dnf:
+        name:
+          - epel-release
+          - git
+          - curl
+          - wget
+          - java-17-openjdk
+        state: present
+    - name: Add Jenkins repo
+      get_url:
+        url: https://pkg.jenkins.io/redhat-stable/jenkins.repo
+        dest: /etc/yum.repos.d/jenkins.repo
+        mode: '0644'
+    - name: Import Jenkins key
+      rpm_key:
+        state: present
+        key: https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
+    - name: Install Jenkins
+      dnf:
+        name: jenkins
+        state: present
+    - name: Check Jenkins sysconfig exists
+      stat:
+        path: /etc/sysconfig/jenkins
+      register: jenkins_cfg
+    - name: Ensure Jenkins port
+      lineinfile:
+        path: /etc/sysconfig/jenkins
+        regexp: '^JENKINS_PORT='
+        line: "JENKINS_PORT={{ jenkins_http_port }}"
+      when: jenkins_cfg.stat.exists
+      notify: restart jenkins
+    - name: Enable and start Jenkins
+      systemd:
+        name: jenkins
+        enabled: true
+    # ngrok 다운로드 및 설치(25-11-14 추가됨)
+    - name: Download ngrok
+      get_url:
+        url: https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz
+        dest: /tmp/ngrok-v3-stable-linux-amd64.tgz
+        mode: "0644"
+    - name: Unzip ngrok
+      unarchive:
+        src: /tmp/ngrok-v3-stable-linux-amd64.tgz
+        dest: /usr/local/bin
+        remote_src: yes
+  handlers:
+    - name: restart jenkins
+      systemd:
+        name: jenkins
+        state: restarted
+################################
+# 2) Zulip 서버 (172.16.6.52)
+################################
+- name: Setup Zulip Docker node
+  hosts: zulip
+  become: true
+  vars:
+    repo_dir: /opt/docker-zulip
+  tasks:
+    - name: Install prerequisites
+      dnf:
+        name:
+          - git
+          - curl
+          - wget
+          - tar
+          - unzip
+          - epel-release
+        state: present
+
+    - name: Install Docker
+      shell: |
+        if ! command -v docker >/dev/null 2>&1; then
+          curl -fsSL https://get.docker.com -o /root/get-docker.sh
+          sh /root/get-docker.sh
+        fi
+        systemctl enable --now docker
+      args:
+        executable: /bin/bash
+
+    - name: Install docker compose plugin
+      dnf:
+        name: docker-compose-plugin
+        state: present
+      ignore_errors: true
+
+    - name: Clone docker-zulip
+      git:
+        repo: https://github.com/zulip/docker-zulip.git
+        dest: "{{ repo_dir }}"
+        force: yes
+
+    - name: Write .env
+      copy:
+        dest: "{{ repo_dir }}/.env"
+        mode: '0644'
+        content: |
+          SETTINGS_FLAVOR=production
+          ZULIP_ADMINISTRATOR="admin@{{ inventory_hostname }}"
+          ZULIP_AUTH_BACKENDS=EmailAuthBackend
+          ZULIP_DOMAIN={{ inventory_hostname }}
+          ZULIP_REALM_NAME="Zulip Chat"
+          SECRETS_email_password="change-me"
+          SETTINGS_EXTERNAL_HOST={{ inventory_hostname }}
+
+    - name: Write docker-compose.override.yml
+      copy:
+        dest: "{{ repo_dir }}/docker-compose.override.yml"
+        mode: '0644'
+        content: |
+          version: '3.8'
+          services:
+            zulip:
+              ports:
+                - "80:80"
+                - "443:443"
+              environment:
+                - ZULIP_DOMAIN={{ inventory_hostname }}
+                - SETTINGS_EXTERNAL_HOST={{ inventory_hostname }}
+                - SETTINGS_ALLOWED_HOSTS=["{{ inventory_hostname }}","localhost","127.0.0.1"]
+
+    - name: Start Zulip stack
+      community.docker.docker_compose_v2:
+        project_src: "{{ repo_dir }}"
+        state: present
+        pull: always
+
+#########################################
+# 3) WAF + Monitoring (172.16.6.53)
+#########################################
+
+
+
+- name: Setup WAF + Monitoring node
+  hosts: waf_monitoring
+  become: true
+
+  vars:
+    waf_dir: /opt/waf
+    mon_dir: /opt/monitoring
+    zulip_backend: "172.16.6.52:80"
+
+  tasks:
+    - name: Install Docker
+      shell: |
+        if ! command -v docker >/dev/null 2>&1; then
+          curl -fsSL https://get.docker.com -o /root/get-docker.sh
+          sh /root/get-docker.sh
+        fi
+        systemctl enable --now docker
+      args:
+        executable: /bin/bash
+
+    - name: Create WAF docker-compose.yml
+      copy:
+        dest: "{{ waf_dir }}/docker-compose.yml"
+        mode: '0644'
+        content: |
+          version: "3.8"
+          services:
+            waf-nginx:
+              image: owasp/modsecurity-crs:nginx
+              ports:
+                - "80:80"
+                - "443:443"
+              environment:
+                BACKEND: "{{ zulip_backend }}"
+              restart: unless-stopped
+
+    - name: Start WAF
+      community.docker.docker_compose_v2:
+        project_src: "{{ waf_dir }}"
+        state: present
+        pull: always
+
+    - name: Create monitoring docker-compose.yml
+      copy:
+        dest: "{{ mon_dir }}/docker-compose.yml"
+        mode: '0644'
+        content: |
+          version: '3.8'
+          services:
+            prometheus:
+              image: prom/prometheus
+              ports:
+                - "9090:9090"
+              restart: unless-stopped
+            grafana:
+              image: grafana/grafana
+              ports:
+                - "3000:3000"
+              restart: unless-stopped
+
+    - name: Start monitoring stack
+      community.docker.docker_compose_v2:
+        project_src: "{{ mon_dir }}"
+        state: present
+        pull: always
+
+
