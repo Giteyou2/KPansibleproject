@@ -292,7 +292,10 @@
         pull: always
 
     # -------------------- NODE EXPORTER INSTALL ------------------------
-
+- name: Install Node Exporter
+  hosts: all
+  become: true
+  tasks:
     - name: Create node_exporter user
       user:
         name: node_exporter
