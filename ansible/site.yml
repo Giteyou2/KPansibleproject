@@ -202,7 +202,7 @@
   become: true
   vars:
     mon_dir: /opt/monitoring
-    prometheus_config: /opt/monitoring/prometheus.yml
+    prometheus_config: /opt/monitoring/prometheus/prometheus.yml
 
   tasks:
 
@@ -273,7 +273,7 @@
               ports:
                 - "9090:9090"
               volumes:
-                - /opt/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+                - /opt/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
               restart: unless-stopped
 
             grafana:
