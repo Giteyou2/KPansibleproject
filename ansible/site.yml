@@ -202,7 +202,7 @@
   become: true
   vars:
     mon_dir: /opt/monitoring
-    prometheus_config: /opt/monitoring/prometheus/prometheus.yml
+    prometheus_config: /opt/monitoring/prometheus.yml
 
   tasks:
 
