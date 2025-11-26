@@ -1,0 +1,64 @@
+---
+- name: Install base tools & Java
+  dnf:
+    name:
+      - epel-release
+      - git
+      - curl
+      - wget
+      - java-17-openjdk
+    state: present
+        
+- name: Add Jenkins repo
+  get_url:
+    url: https://pkg.jenkins.io/redhat-stable/jenkins.repo
+    dest: /etc/yum.repos.d/jenkins.repo
+    mode: '0644'
+        
+- name: Import Jenkins key
+  rpm_key:
+    state: present
+    key: https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
+        
+- name: Install Jenkins
+  dnf:
+    name: jenkins
+    state: present
+        
+- name: Check Jenkins sysconfig exists
+  stat:
+    path: /etc/sysconfig/jenkins
+  register: jenkins_cfg
+      
+- name: Ensure Jenkins port
+  lineinfile:
+    path: /etc/sysconfig/jenkins
+    regexp: '^JENKINS_PORT='
+    line: "JENKINS_PORT={{ jenkins_http_port }}"
+  when: jenkins_cfg.stat.exists
+  notify: restart jenkins
+      
+- name: Enable and start Jenkins
+  systemd:
+    name: jenkins
+    enabled: true
+
+# -------------------- ngrok 설치 (이미 있으면 스킵) -----------------
+- name: Check if ngrok already exists
+  stat:
+    path: /usr/local/bin/ngrok
+  register: ngrok_file
+
+- name: Download ngrok
+  get_url:
+    url: https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz
+    dest: /tmp/ngrok-v3-stable-linux-amd64.tgz
+    mode: "0644"
+  when: not ngrok_file.stat.exists
+
+- name: Unzip ngrok
+  unarchive:
+    src: /tmp/ngrok-v3-stable-linux-amd64.tgz
+    dest: /usr/local/bin
+    remote_src: yes
+  when: not ngrok_file.stat.exists

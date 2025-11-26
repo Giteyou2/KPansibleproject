@@ -1,0 +1,107 @@
+---
+- name: Install prerequisites
+  dnf:
+    name:
+      - git
+      - curl
+      - wget
+      - tar
+      - unzip
+      - epel-release
+    state: present
+
+# WAF, zulip 디렉토리 생성
+- name: Create waf file if does not exist
+  file:
+    path: "{{ waf_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Create zulip file if does not exist
+  file:
+    path: "{{ repo_dir }}"
+    state: directory
+    mode: '0755'
+
+# 도커 설치
+- name: Install Docker
+  shell: |
+    if ! command -v docker >/dev/null 2>&1; then
+      curl -fsSL https://get.docker.com -o /root/get-docker.sh
+      sh /root/get-docker.sh
+    fi
+    systemctl enable --now docker
+  args:
+    executable: /bin/bash
+
+# 도커 컴포즈 플러그인 설치
+- name: Install docker compose plugin
+  dnf:
+    name: docker-compose-plugin
+    state: present
+  ignore_errors: true
+
+# zulip 가져오기
+- name: Clone docker-zulip
+  git:
+    repo: https://github.com/zulip/docker-zulip.git
+    dest: "{{ repo_dir }}"
+    force: yes
+
+- name: Write .env
+  copy:
+    dest: "{{ repo_dir }}/.env"
+    mode: '0644'
+    content: |
+      SETTINGS_FLAVOR=production
+      ZULIP_ADMINISTRATOR="admin@{{ inventory_hostname }}"
+      ZULIP_AUTH_BACKENDS=EmailAuthBackend
+      ZULIP_DOMAIN={{ inventory_hostname }}
+      ZULIP_REALM_NAME="Zulip Chat"
+      SECRETS_email_password="change-me"
+      SETTINGS_EXTERNAL_HOST={{ inventory_hostname }}
+
+- name: Write docker-compose.override.yml
+  copy:
+    dest: "{{ repo_dir }}/docker-compose.override.yml"
+    mode: '0644'
+    content: |
+      version: '3.8'
+      services:
+        zulip:
+          ports:
+            - "80:80"
+            - "443:443"
+          environment:
+            - ZULIP_DOMAIN={{ inventory_hostname }}
+            - SETTINGS_EXTERNAL_HOST={{ inventory_hostname }}
+            - SETTINGS_ALLOWED_HOSTS=["{{ inventory_hostname }}","localhost","127.0.0.1"]
+
+- name: Create WAF docker-compose.yml
+  copy:
+    dest: "{{ waf_dir }}/docker-compose.yml"
+    mode: '0644'
+    content: |
+      version: "3.8"
+      services:
+        waf-nginx:
+          image: owasp/modsecurity-crs:nginx
+          #11-20 포트 충돌때문에 포트 지워버리는 수정
+          #ports:
+            #- "80:80"
+            #- "443:443"
+          environment:
+            BACKEND: "{{ zulip_backend }}"
+          restart: unless-stopped
+
+- name: Start WAF
+  community.docker.docker_compose_v2:
+    project_src: "{{ waf_dir }}"
+    state: present
+    pull: always
+
+- name: Start Zulip stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ repo_dir }}"
+    state: present
+    pull: always

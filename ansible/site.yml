@@ -7,81 +7,11 @@
   become: true
   vars:
     jenkins_http_port: 8080
-  tasks:
-    - name: Install base tools & Java
-      dnf:
-        name:
-          - epel-release
-          - git
-          - curl
-          - wget
-          - java-17-openjdk
-        state: present
-        
-    - name: Add Jenkins repo
-      get_url:
-        url: https://pkg.jenkins.io/redhat-stable/jenkins.repo
-        dest: /etc/yum.repos.d/jenkins.repo
-        mode: '0644'
-        
-    - name: Import Jenkins key
-      rpm_key:
-        state: present
-        key: https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
-        
-    - name: Install Jenkins
-      dnf:
-        name: jenkins
-        state: present
-        
-    - name: Check Jenkins sysconfig exists
-      stat:
-        path: /etc/sysconfig/jenkins
-      register: jenkins_cfg
-      
-    - name: Ensure Jenkins port
-      lineinfile:
-        path: /etc/sysconfig/jenkins
-        regexp: '^JENKINS_PORT='
-        line: "JENKINS_PORT={{ jenkins_http_port }}"
-      when: jenkins_cfg.stat.exists
-      notify: restart jenkins
-      
-    - name: Enable and start Jenkins
-      systemd:
-        name: jenkins
-        enabled: true
-        
-    # ngrok 다운로드 및 설치 & ngrok파일 존재시 스킵함(25-11-18 추가됨)
-    # ngrok 존재 여부 확인
-    - name: Check if ngrok already exists
-      stat:
-        path: /usr/local/bin/ngrok
-      register: ngrok_file
+  roles:
+    - ansible_control
 
-    # ngrok 다운로드 (파일이 없을 때만)
-    - name: Download ngrok
-      get_url:
-        url: https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz
-        dest: /tmp/ngrok-v3-stable-linux-amd64.tgz
-        mode: "0644"
-      when: not ngrok_file.stat.exists
-
-    # ngrok 압축 해제 (파일이 없을 때만)
-    - name: Unzip ngrok
-      unarchive:
-        src: /tmp/ngrok-v3-stable-linux-amd64.tgz
-        dest: /usr/local/bin
-        remote_src: yes
-      when: not ngrok_file.stat.exists
-
-  handlers:
-    - name: restart jenkins
-      systemd:
-        name: jenkins
-        state: restarted
 ################################
-# 2) Zulip 서버 (172.16.6.52)
+# 2) Zulip 서버 (172.16.6.52) + WAF
 ################################
 - name: Setup Zulip Docker WAF node
   hosts: zulip
@@ -90,261 +20,27 @@
     waf_dir: /opt/waf
     repo_dir: /opt/docker-zulip
     zulip_backend: "172.16.6.52:80"
-  tasks:
-    - name: Install prerequisites
-      dnf:
-        name:
-          - git
-          - curl
-          - wget
-          - tar
-          - unzip
-          - epel-release
-        state: present
-    # WAF, zulip 디렉토리 생성
-    - name: Create waf file if does not exist
-      file:
-        path: /opt/waf
-        state: directory
-        mode: '0755'
-    - name: Create zulip file if does not exist
-      file:
-        path: /opt/docker-zulip
-        state: directory
-        mode: '0755'
-    # 도커 설치
-    - name: Install Docker
-      shell: |
-        if ! command -v docker >/dev/null 2>&1; then
-          curl -fsSL https://get.docker.com -o /root/get-docker.sh
-          sh /root/get-docker.sh
-        fi
-        systemctl enable --now docker
-      args:
-        executable: /bin/bash
-    # 도커 컴포즈 플러그인 설치
-    - name: Install docker compose plugin
-      dnf:
-        name: docker-compose-plugin
-        state: present
-      ignore_errors: true
-    # zulip 가져오기
-    - name: Clone docker-zulip
-      git:
-        repo: https://github.com/zulip/docker-zulip.git
-        dest: "{{ repo_dir }}"
-        force: yes
-
-    - name: Write .env
-      copy:
-        dest: "{{ repo_dir }}/.env"
-        mode: '0644'
-        content: |
-          SETTINGS_FLAVOR=production
-          ZULIP_ADMINISTRATOR="admin@{{ inventory_hostname }}"
-          ZULIP_AUTH_BACKENDS=EmailAuthBackend
-          ZULIP_DOMAIN={{ inventory_hostname }}
-          ZULIP_REALM_NAME="Zulip Chat"
-          SECRETS_email_password="change-me"
-          SETTINGS_EXTERNAL_HOST={{ inventory_hostname }}
-
-    - name: Write docker-compose.override.yml
-      copy:
-        dest: "{{ repo_dir }}/docker-compose.override.yml"
-        mode: '0644'
-        content: |
-          version: '3.8'
-          services:
-            zulip:
-              ports:
-                - "80:80"
-                - "443:443"
-              environment:
-                - ZULIP_DOMAIN={{ inventory_hostname }}
-                - SETTINGS_EXTERNAL_HOST={{ inventory_hostname }}
-                - SETTINGS_ALLOWED_HOSTS=["{{ inventory_hostname }}","localhost","127.0.0.1"]
-
-    - name: Create WAF docker-compose.yml
-      copy:
-        dest: "{{ waf_dir }}/docker-compose.yml"
-        mode: '0644'
-        content: |
-          version: "3.8"
-          services:
-            waf-nginx:
-              image: owasp/modsecurity-crs:nginx
-              #11-20 포트 충돌때문에 포트 지워버리는 수정
-              #ports:
-                #- "80:80"
-                #- "443:443"
-              environment:
-                BACKEND: "{{ zulip_backend }}"
-              restart: unless-stopped
-
-    - name: Start WAF
-      community.docker.docker_compose_v2:
-        project_src: "{{ waf_dir }}"
-        state: present
-        pull: always
-
-    - name: Start Zulip stack
-      community.docker.docker_compose_v2:
-        project_src: "{{ repo_dir }}"
-        state: present
-        pull: always
+  roles:
+    - zulip_waf
 
 #########################################
-# 3) Monitoring (172.16.6.53) 11-21 수정완료
+# 3) Monitoring (172.16.6.53)
 #########################################
-
 - name: Setup Monitoring node
   hosts: monitoring
   become: true
   vars:
     mon_dir: /opt/monitoring
     prometheus_config: /opt/monitoring/prometheus/prometheus.yml
+  roles:
+    - monitoring
 
-  tasks:
-
-    - name: Create monitoring directory
-      file:
-        path: "{{ mon_dir }}"
-        state: directory
-        mode: '0755'
-
-    - name: Create Prometheus config directory
-      file:
-        path: "{{ mon_dir }}/prometheus"
-        state: directory
-        mode: '0755'
-
-    - name: Create Grafana data directory
-      file:
-        path: "{{ mon_dir }}/grafana"
-        state: directory
-        mode: '0777'
-
-    - name: Install Docker
-      shell: |
-        if ! command -v docker >/dev/null 2>&1; then
-          curl -fsSL https://get.docker.com -o /root/get-docker.sh
-          sh /root/get-docker.sh
-        fi
-        systemctl enable --now docker
-      args:
-        executable: /bin/bash
-
-    - name: Install docker compose plugin
-      dnf:
-        name: docker-compose-plugin
-        state: present
-      ignore_errors: true
-
-    - name: Create Prometheus config
-      copy:
-        dest: "{{ prometheus_config }}"
-        mode: '0644'
-        content: |
-          global:
-            scrape_interval: 15s
-
-          scrape_configs:
-            - job_name: 'prometheus'
-              static_configs:
-                - targets: ['localhost:9090']
-
-            - job_name: 'node_exporter'
-              static_configs:
-                - targets:
-                    - '172.16.6.51:9100'
-                    - '172.16.6.52:9100'
-                    - '172.16.6.53:9100'
-
-    - name: Create Docker compose file
-      copy:
-        dest: "{{ mon_dir }}/docker-compose.yml"
-        mode: '0644'
-        content: |
-          version: '3.8'
-          services:
-            prometheus:
-              image: prom/prometheus
-              container_name: prometheus
-              ports:
-                - "9090:9090"
-              volumes:
-                - /opt/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-              restart: unless-stopped
-
-            grafana:
-              image: grafana/grafana
-              container_name: grafana
-              ports:
-                - "3000:3000"
-              volumes:
-                - /opt/monitoring/grafana:/var/lib/grafana
-              restart: unless-stopped
-
-    - name: Deploy monitoring stack
-      community.docker.docker_compose_v2:
-        project_src: "{{ mon_dir }}"
-        state: present
-        pull: always
-
-    # -------------------- NODE EXPORTER INSTALL ------------------------
+#########################################
+# 4) Node Exporter (all)
+#########################################
 - name: Install Node Exporter
   hosts: all
   become: true
-  tasks:
-    - name: Create node_exporter user
-      user:
-        name: node_exporter
-        shell: /bin/false
-        system: yes
-
-    - name: Download node_exporter
-      get_url:
-        url: https://github.com/prometheus/node_exporter/releases/download/v1.8.2/node_exporter-1.8.2.linux-amd64.tar.gz
-        dest: /usr/local/src/node_exporter.tar.gz
-
-    - name: Extract node_exporter
-      ansible.builtin.unarchive:
-        src: /usr/local/src/node_exporter.tar.gz
-        dest: /usr/local/src/
-        remote_src: yes
-
-    - name: Copy node_exporter binary
-      copy:
-        src: /usr/local/src/node_exporter-1.8.2.linux-amd64/node_exporter
-        dest: /usr/local/bin/node_exporter
-        mode: '0755'
-        owner: node_exporter
-        group: node_exporter
-
-    - name: Create node_exporter systemd service
-      copy:
-        dest: /etc/systemd/system/node_exporter.service
-        mode: '0644'
-        content: |
-          [Unit]
-          Description=Prometheus Node Exporter
-          Wants=network-online.target
-          After=network-online.target
-
-          [Service]
-          User=node_exporter
-          Group=node_exporter
-          Type=simple
-          ExecStart=/usr/local/bin/node_exporter
-
-          [Install]
-          WantedBy=multi-user.target
-
-    - name: Start node_exporter service
-      systemd:
-        name: node_exporter
-        daemon_reload: yes
-        enabled: yes
-        state: started
-
+  roles:
+    - node_exporter
 

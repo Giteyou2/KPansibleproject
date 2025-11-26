@@ -1,0 +1,85 @@
+---
+- name: Create monitoring directory
+  file:
+    path: "{{ mon_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Create Prometheus config directory
+  file:
+    path: "{{ mon_dir }}/prometheus"
+    state: directory
+    mode: '0755'
+
+- name: Create Grafana data directory
+  file:
+    path: "{{ mon_dir }}/grafana"
+    state: directory
+    mode: '0777'
+
+- name: Install Docker
+  shell: |
+    if ! command -v docker >/dev/null 2>&1; then
+      curl -fsSL https://get.docker.com -o /root/get-docker.sh
+      sh /root/get-docker.sh
+    fi
+    systemctl enable --now docker
+  args:
+    executable: /bin/bash
+
+- name: Install docker compose plugin
+  dnf:
+    name: docker-compose-plugin
+    state: present
+  ignore_errors: true
+
+- name: Create Prometheus config
+  copy:
+    dest: "{{ prometheus_config }}"
+    mode: '0644'
+    content: |
+      global:
+        scrape_interval: 15s
+
+      scrape_configs:
+        - job_name: 'prometheus'
+          static_configs:
+            - targets: ['localhost:9090']
+
+        - job_name: 'node_exporter'
+          static_configs:
+            - targets:
+                - '172.16.6.51:9100'
+                - '172.16.6.52:9100'
+                - '172.16.6.53:9100'
+
+- name: Create Docker compose file
+  copy:
+    dest: "{{ mon_dir }}/docker-compose.yml"
+    mode: '0644'
+    content: |
+      version: '3.8'
+      services:
+        prometheus:
+          image: prom/prometheus
+          container_name: prometheus
+          ports:
+            - "9090:9090"
+          volumes:
+            - /opt/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+          restart: unless-stopped
+
+        grafana:
+          image: grafana/grafana
+          container_name: grafana
+          ports:
+            - "3000:3000"
+          volumes:
+            - /opt/monitoring/grafana:/var/lib/grafana
+          restart: unless-stopped
+
+- name: Deploy monitoring stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ mon_dir }}"
+    state: present
+    pull: always
