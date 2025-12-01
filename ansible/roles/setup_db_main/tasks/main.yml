@@ -25,7 +25,6 @@
 
 - name: Clean DNF metadata cache
   ansible.builtin.command: dnf clean all
-  # 이전 오류 발생 방지를 위해 'args: warn: false' 제거
 
 # --- 1. PostgreSQL 16 설치 및 서비스 활성화 (DNF 사용) ---
 
@@ -35,10 +34,10 @@
     state: present
     key: "https://download.postgresql.org/pub/repos/yum/RPM-GPG-KEY-PGDG"
 
-# PostgreSQL 16 버전 저장소 추가 (RHEL/CentOS용)
-- name: Add PostgreSQL 16 Official Repository (RHEL/CentOS)
+# 📌 PostgreSQL 16 버전 저장소 추가 (제공된 EL-9 URL 사용)
+- name: Add PostgreSQL 16 Official Repository (EL-9 specific)
   ansible.builtin.dnf:
-    name: "https://download.postgresql.org/pub/repos/yum/reporpms/RHEL-$releasever-x86_64/pgdg-redhat-repo-latest.noarch.rpm"
+    name: "https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm"
     state: present
 
 # PostgreSQL 16 서버 패키지 설치
@@ -61,7 +60,7 @@
     name: "{{ pg_service_name }}"
     state: started
     enabled: true
-    
+
 # DB 접속을 위한 파이썬 패키지 설치 (Ansible 모듈 사용을 위해 필수)
 - name: Install Python required packages (psycopg2)
   ansible.builtin.dnf:
@@ -102,7 +101,7 @@
     login_user: postgres
     host: /var/run/postgresql
   become_user: postgres
-    
+
 # --- 3. PostgreSQL 설정 파일 수정 (postgresql.conf) ---
 
 # 모든 네트워크 인터페이스에서 접속을 허용하도록 설정
@@ -113,7 +112,7 @@
     line: "listen_addresses = '*'"
     backrefs: yes
     state: present
-    
+
 # 복제에 필요한 파라미터 설정
 - name: Set required replication parameters on Main
   ansible.builtin.lineinfile:
@@ -135,7 +134,7 @@
     path: "{{ pg_config_dir }}/pg_hba.conf"
     line: "host replication {{ repl_user }} {{ standby_ip }}/32 trust" # 'trust'는 복제 연결을 위해 자주 사용됨
     insertafter: EOF
-    
+
 # Zulip 애플리케이션 사용자의 원격 접속 허용
 - name: Allow Zulip connections in pg_hba.conf
   ansible.builtin.lineinfile:
@@ -150,3 +149,4 @@
   ansible.builtin.service:
     name: "{{ pg_service_name }}"
     state: restarted
+    

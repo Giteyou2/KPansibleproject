@@ -15,10 +15,10 @@
     state: present
     key: "https://download.postgresql.org/pub/repos/yum/RPM-GPG-KEY-PGDG"
 
-# PostgreSQL 16 버전 저장소 추가
-- name: Add PostgreSQL 16 Official Repository (RHEL/CentOS)
+# PostgreSQL 16 버전 저장소 추가 (제공된 EL-9 URL 사용)
+- name: Add PostgreSQL 16 Official Repository (EL-9 specific)
   ansible.builtin.dnf:
-    name: "https://download.postgresql.org/pub/repos/yum/reporpms/RHEL-$releasever-x86_64/pgdg-redhat-repo-latest.noarch.rpm"
+    name: "https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm"
     state: present
 
 # PostgreSQL 16 서버 패키지 설치
