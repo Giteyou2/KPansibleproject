@@ -2,14 +2,14 @@
 # 하드코딩된 변수 설정 (PostgreSQL, NFS 서버 접속 정보 및 경로)
 - name: Set necessary variables for external services
   ansible.builtin.set_fact:
-    # NFS 설정 변수 (인벤토리에서 동적 참조)
+    # NFS 설정 변수 (외부 DB 설정은 제거됨)
     nfs_server_ip: "{{ groups['nfs_server'][0] }}"
     nfs_export_path: "/mnt/zulip_data"
-    zulip_storage_dir: "/opt/zulip/data" 
+    zulip_storage_dir: "/opt/zulip/data"
     
-    # PostgreSQL 접속 정보 (admin/admin으로 설정)
-    db_user: "admin"
-    db_password: "admin"
+    # 📌 DB 접속 정보 변수 (내부 DB 사용 시 불필요하므로 제거해도 되지만, 여기서는 주석 처리)
+    # db_user: "admin"
+    # db_password: "admin"
 
 
 # --- 1. 필수 패키지 설치 ---
@@ -27,7 +27,6 @@
     state: present
   become: true
 
-# WAF 디렉토리 생성 작업은 제거됨
 - name: Create zulip file if does not exist
   ansible.builtin.file:
     path: "{{ repo_dir }}"
@@ -58,24 +57,25 @@
   ignore_errors: true
 
 # --- 3. NFS 마운트 설정 (호스트 서버) ---
+# (NFS는 Zulip 데이터 볼륨으로 계속 사용되므로 유지됩니다)
 
 - name: Create local mount point for Zulip data on host
   ansible.builtin.file:
     path: "{{ zulip_storage_dir }}"
     state: directory
-    mode: '0755' 
+    mode: '0755'
   become: true
 
 - name: Mount NFS share for Zulip data
   ansible.posix.mount:
-    src: "{{ nfs_server_ip }}:{{ nfs_export_path }}" 
+    src: "{{ nfs_server_ip }}:{{ nfs_export_path }}"
     path: "{{ zulip_storage_dir }}"
     fstype: nfs
     opts: rw,sync,hard,intr
     state: mounted
   become: true
 
-# --- 4. Zulip 소스 및 설정 파일 준비 ---
+# --- 4. Zulip 소스 및 설정 파일 준비 (핵심 수정 부분) ---
 
 # zulip 가져오기
 - name: Clone docker-zulip
@@ -85,8 +85,8 @@
     force: yes
   become: true
 
-# .env 파일 생성 (외부 DB 설정 포함)
-- name: Write .env (Modified for external services)
+# .env 파일 생성 (내부 DB 설정으로 변경)
+- name: Write .env (Modified for internal DB)
   ansible.builtin.copy:
     dest: "{{ repo_dir }}/.env"
     mode: '0666'
@@ -99,15 +99,16 @@
       SECRETS_email_password="change-me"
       SETTINGS_EXTERNAL_HOST={{ inventory_hostname }}
       
-      # 외부 PostgreSQL 설정: 유저와 비밀번호를 'admin'으로 설정
-      EXTERNAL_POSTGRES=True
-      POSTGRES_HOST={{ groups['db_main'][0] }} 
-      POSTGRES_PORT=5432
-      POSTGRES_USER={{ db_user }} 
-      SECRETS_postgres_password={{ db_password }}
+      # 📌 외부 DB 설정 제거: EXTERNAL_POSTGRES 관련 변수 삭제
+      # Zulip 설치 스크립트가 Docker Compose 파일 내의 기본 DB 서비스를 사용하도록 합니다.
+      
+      # Zulip이 자동으로 생성할 DB 계정에 대한 비밀번호 설정 (선택 사항이지만 권장)
+      # Zulip은 이 변수를 기반으로 내부 DB의 비밀번호를 설정합니다.
+      # SECRETS_postgres_password="a-very-secret-password-for-internal-db" 
   become: true
 
 # docker-compose.override.yml 파일 생성 (NFS 볼륨 바인딩 포함)
+# 이 파일은 DB, Redis, RabbitMQ 서비스를 숨기지 않도록 그대로 유지해야 합니다.
 - name: Write docker-compose.override.yml (Modified for external services)
   ansible.builtin.copy:
     dest: "{{ repo_dir }}/docker-compose.override.yml"
