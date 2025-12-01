@@ -9,31 +9,7 @@
     pg_config_dir: "/var/lib/pgsql/16/data"           # PostgreSQL 16의 데이터 디렉토리 경로
     pg_service_name: "postgresql-16"                  # PostgreSQL 16 서비스 이름
 
-# --- 기존 PGDG 저장소 정리 및 캐시 초기화 (GPG 오류 방지) ---
-
-- name: Remove any existing PGDG repository files
-  ansible.builtin.find:
-    paths: /etc/yum.repos.d
-    patterns: 'pgdg-*.repo'
-  register: existing_repos
-
-- name: Delete found PGDG repository files
-  ansible.builtin.file:
-    path: "{{ item.path }}"
-    state: absent
-  loop: "{{ existing_repos.files }}"
-
-- name: Clean DNF metadata cache
-  ansible.builtin.command: dnf clean all
-
 # --- 1. PostgreSQL 16 설치 및 서비스 활성화 (DNF 사용) ---
-
-# PostgreSQL 16 버전 GPG 키 가져오기 (404 오류 해결을 위해 경로 수정)
-- name: Import PostgreSQL GPG Key
-  ansible.builtin.rpm_key:
-    state: present
-    key: "https://download.postgresql.org/pub/repos/yum/RPM-GPG-KEY-PGDG-16"
-
 # PostgreSQL 16 버전 저장소 추가 (제공된 EL-9 URL 사용)
 - name: Add PostgreSQL 16 Official Repository (EL-9 specific)
   ansible.builtin.dnf:
