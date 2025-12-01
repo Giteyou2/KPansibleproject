@@ -6,8 +6,8 @@
     repl_user: "replicator"
     repl_password: "replicator"
     standby_ip: "172.16.6.57"                         # [필수 수정] 스탠바이 DB 서버의 실제 IP 주소
-    pg_config_dir: "/var/lib/pgsql/16/data"           # PostgreSQL 16의 데이터 디렉토리 경로 (CentOS 9 기준)
-    pg_service_name: "postgresql-16"                  # PostgreSQL 16 서비스 이름 (CentOS 9 기준)
+    pg_config_dir: "/var/lib/pgsql/16/data"           # PostgreSQL 16의 데이터 디렉토리 경로
+    pg_service_name: "postgresql-16"                  # PostgreSQL 16 서비스 이름
 
 # --- 기존 PGDG 저장소 정리 및 캐시 초기화 (GPG 오류 방지) ---
 
@@ -28,13 +28,13 @@
 
 # --- 1. PostgreSQL 16 설치 및 서비스 활성화 (DNF 사용) ---
 
-# PostgreSQL 공식 GPG 키 가져오기 (저장소 무결성 검증)
+# PostgreSQL 16 버전 GPG 키 가져오기 (404 오류 해결을 위해 경로 수정)
 - name: Import PostgreSQL GPG Key
   ansible.builtin.rpm_key:
     state: present
-    key: "https://download.postgresql.org/pub/repos/yum/RPM-GPG-KEY-PGDG"
+    key: "https://download.postgresql.org/pub/repos/yum/RPM-GPG-KEY-PGDG-16"
 
-# 📌 PostgreSQL 16 버전 저장소 추가 (제공된 EL-9 URL 사용)
+# PostgreSQL 16 버전 저장소 추가 (제공된 EL-9 URL 사용)
 - name: Add PostgreSQL 16 Official Repository (EL-9 specific)
   ansible.builtin.dnf:
     name: "https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm"
@@ -44,11 +44,11 @@
 - name: Install PostgreSQL 16 server packages (RHEL/CentOS)
   ansible.builtin.dnf:
     name:
-      - "postgresql16-server"       # PostgreSQL 16 서버 패키지
-      - "postgresql16-contrib"      # 추가 유틸리티 패키지
+      - "postgresql16-server"
+      - "postgresql16-contrib"
     state: present
 
-# PostgreSQL DB 초기화 (데이터 디렉토리가 비어 있을 경우에만 실행)
+# PostgreSQL DB 초기화
 - name: Initialize PostgreSQL 16 database (Only if data directory is empty)
   ansible.builtin.command: "/usr/pgsql-16/bin/postgresql-16-setup initdb"
   args:
@@ -61,7 +61,7 @@
     state: started
     enabled: true
 
-# DB 접속을 위한 파이썬 패키지 설치 (Ansible 모듈 사용을 위해 필수)
+# DB 접속을 위한 파이썬 패키지 설치
 - name: Install Python required packages (psycopg2)
   ansible.builtin.dnf:
     name:
@@ -75,10 +75,10 @@
   community.postgresql.postgresql_user:
     name: "{{ repl_user }}"
     password: "{{ repl_password }}"
-    role_attr_flags: REPLICATION  # 복제 권한 부여
+    role_attr_flags: REPLICATION
     state: present
     login_user: postgres
-    host: /var/run/postgresql # 로컬 소켓을 통한 접속
+    host: /var/run/postgresql
   become_user: postgres
 
 # Zulip 애플리케이션용 데이터베이스 생성
@@ -96,7 +96,7 @@
     db: "zulip_production"
     name: "{{ db_user }}"
     password: "{{ db_password }}"
-    priv: ALL # Zulip DB에 대한 모든 권한 부여
+    priv: ALL
     state: present
     login_user: postgres
     host: /var/run/postgresql
@@ -122,24 +122,24 @@
     regexp: "^(.*){{ item.split('=')[0].strip() }}.*$"
     insertafter: EOF
   loop:
-    - "wal_level = replica"       # 복제본으로 사용하기 위해 WAL 레벨 설정
-    - "max_wal_senders = 10"      # 최대 WAL 송신 프로세스 수 설정
-    - "hot_standby = on"          # Standby 서버에서 읽기 쿼리 허용
+    - "wal_level = replica"
+    - "max_wal_senders = 10"
+    - "hot_standby = on"
 
 # --- 4. 접속 허용 규칙 수정 (pg_hba.conf) ---
 
-# Standby 서버의 복제 사용자 접속 허용 (IP 주소 기반)
+# Standby 서버의 복제 사용자 접속 허용
 - name: Allow Standby connections in pg_hba.conf
   ansible.builtin.lineinfile:
     path: "{{ pg_config_dir }}/pg_hba.conf"
-    line: "host replication {{ repl_user }} {{ standby_ip }}/32 trust" # 'trust'는 복제 연결을 위해 자주 사용됨
+    line: "host replication {{ repl_user }} {{ standby_ip }}/32 trust"
     insertafter: EOF
 
 # Zulip 애플리케이션 사용자의 원격 접속 허용
 - name: Allow Zulip connections in pg_hba.conf
   ansible.builtin.lineinfile:
     path: "{{ pg_config_dir }}/pg_hba.conf"
-    line: "host zulip_production {{ db_user }} 0.0.0.0/0 md5" # 모든 IP에서 md5 암호화 접속 허용
+    line: "host zulip_production {{ db_user }} 0.0.0.0/0 md5"
     insertafter: EOF
 
 # --- 5. PostgreSQL 서비스 재시작 ---
@@ -149,4 +149,3 @@
   ansible.builtin.service:
     name: "{{ pg_service_name }}"
     state: restarted
-    
