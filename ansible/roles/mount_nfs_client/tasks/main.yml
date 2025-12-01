@@ -1,0 +1,37 @@
+---
+# 하드코딩된 변수 설정 (편의를 위해 Role 내부에 정의)
+- name: Set hardcoded variables for NFS Client setup
+  ansible.builtin.set_fact:
+    nfs_server_ip: "172.16.6.56" # NFS 서버 IP
+    nfs_export_path: "/mnt/zulip_data" # NFS 서버의 공유 경로
+    zulip_mount_path: "/opt/zulip/data" # Zulip 서버가 마운트할 로컬 경로
+
+# 1. NFS 패키지 설치
+- name: Install nfs-utils package
+  ansible.builtin.dnf:
+    name: nfs-utils
+    state: present
+
+# 2. 로컬 마운트 디렉토리 생성
+- name: Create local mount directory for Zulip data
+  ansible.builtin.file:
+    path: "{{ zulip_mount_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+# 3. NFS 마운트 설정 (/etc/fstab에 추가)
+- name: Add NFS mount point to /etc/fstab
+  ansible.builtin.mount:
+    path: "{{ zulip_mount_path }}"
+    src: "{{ nfs_server_ip }}:{{ nfs_export_path }}"
+    fstype: nfs
+    # Zulip 컨테이너가 마운트할 때 권장되는 옵션입니다.
+    opts: rw,sync,hard,intr,noatime,nolock 
+    state: present
+
+# 4. 마운트 실행 (fstab에 추가된 항목)
+- name: Mount the NFS volume
+  ansible.builtin.command: mount -a
+  changed_when: true

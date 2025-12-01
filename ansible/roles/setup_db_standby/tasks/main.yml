@@ -1,0 +1,95 @@
+- name: Set hardcoded variables for Standby DB setup
+  ansible.builtin.set_fact:
+    pg_version: "16"                                  # PostgreSQL 16 버전 설정
+    main_db_ip: "172.16.6.56"                         # [필수 수정] 메인 DB 서버의 실제 IP 주소
+    repl_user: "replicator"
+    repl_password: "replicator"
+    pg_config_dir: "/var/lib/pgsql/16/data"           # PostgreSQL 16의 데이터 디렉토리 경로
+    pg_service_name: "postgresql-16"                  # PostgreSQL 16 서비스 이름
+
+# --- 1. PostgreSQL 16 설치 및 서비스 비활성화 (DNF 사용) ---
+
+# PostgreSQL 공식 GPG 키 가져오기
+- name: Import PostgreSQL GPG Key
+  ansible.builtin.rpm_key:
+    state: present
+    key: "https://download.postgresql.org/pub/repos/yum/RPM-GPG-KEY-PGDG"
+
+# PostgreSQL 16 버전 저장소 추가
+- name: Add PostgreSQL 16 Official Repository (RHEL/CentOS)
+  ansible.builtin.dnf:
+    name: "https://download.postgresql.org/pub/repos/yum/reporpms/RHEL-$releasever-x86_64/pgdg-redhat-repo-latest.noarch.rpm"
+    state: present
+
+# PostgreSQL 16 서버 패키지 설치
+- name: Install PostgreSQL 16 server packages (RHEL/CentOS)
+  ansible.builtin.dnf:
+    name:
+      - "postgresql16-server"
+      - "postgresql16-contrib"
+    state: present
+
+# 서비스가 실행되어 있다면 복제를 위해 잠시 중지 (rsync 전에 필요)
+- name: Stop PostgreSQL service (if running)
+  ansible.builtin.service:
+    name: "{{ pg_service_name }}"
+    state: stopped
+    enabled: false # 자동 시작 방지
+
+# DB 초기화 (데이터 복제 시 initdb를 건너뛰거나, 초기화 후 데이터를 덮어쓰기)
+- name: Ensure PostgreSQL data directory exists and is empty
+  ansible.builtin.file:
+    path: "{{ pg_config_dir }}"
+    state: absent
+  ignore_errors: true
+  
+- name: Re-create PostgreSQL data directory
+  ansible.builtin.file:
+    path: "{{ pg_config_dir }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0700'
+
+# --- 2. Main DB에서 데이터 복사 (Base Backup) ---
+
+# 메인 DB에서 데이터 디렉토리 전체를 복사 (복제 슬롯 사용)
+- name: Perform base backup from Main DB
+  ansible.builtin.command: >
+    /usr/pgsql-16/bin/pg_basebackup -h {{ main_db_ip }} -U {{ repl_user }} -D {{ pg_config_dir }} -P -R -w
+  become: yes
+  become_user: postgres
+  # -P: 진행 상황 표시, -R: recovery.conf (12 이후는 standby.signal) 자동 생성, -w: 암호 입력 요청 방지 (pgpass 파일 필요)
+
+# --- 3. 설정 파일 수정 (PostgreSQL 12 버전 이후) ---
+
+# standby.signal 파일은 pg_basebackup의 -R 옵션으로 이미 생성됨
+- name: Create standby.signal file (for Postgre 12+)
+  ansible.builtin.file:
+    path: "{{ pg_config_dir }}/standby.signal"
+    state: touch
+    owner: postgres
+    group: postgres
+    mode: '0600'
+  become: yes
+  become_user: postgres
+
+# 복제 연결 정보 설정 (pg_basebackup의 -R 옵션이 recovery.conf 대신 postgresql.conf에 설정 추가)
+- name: Configure replication connection in postgresql.conf
+  ansible.builtin.lineinfile:
+    path: "{{ pg_config_dir }}/postgresql.conf"
+    regexp: '^(.*)primary_conninfo = .*$'
+    line: "primary_conninfo = 'host={{ main_db_ip }} user={{ repl_user }} password={{ repl_password }}'"
+    insertafter: EOF
+    state: present
+  become: yes
+  become_user: postgres
+
+# --- 4. PostgreSQL 서비스 시작 ---
+
+# 복제를 시작하기 위해 서비스 재시작 (standby 모드로 기동)
+- name: Start PostgreSQL service on Standby
+  ansible.builtin.service:
+    name: "{{ pg_service_name }}"
+    state: started
+    enabled: true

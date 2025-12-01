@@ -1,0 +1,43 @@
+---
+# 하드코딩된 변수 설정 (편의를 위해 Role 내부에 정의)
+- name: Set hardcoded variables for NFS Server setup
+  ansible.builtin.set_fact:
+    nfs_server_ip: "172.16.6.56"
+    zulip_server_ip: "172.16.6.0/24" # 단일 Zulip 서버 IP (여러 개일 경우 IP 대역 사용: 예: "172.16.6.0/24")
+    nfs_export_path: "/mnt/zulip_data"
+
+# 1. NFS 패키지 설치
+- name: Install nfs-utils package
+  ansible.builtin.dnf:
+    name: nfs-utils
+    state: present
+
+# 2. 공유 디렉토리 생성 및 권한 설정
+- name: Create NFS export directory and set permissions
+  ansible.builtin.file:
+    path: "{{ nfs_export_path }}"
+    state: directory
+    # NFS를 통한 데이터 공유 시 일반적으로 nobody/nobody 또는 Zulip의 UID/GID를 맞춥니다.
+    owner: nobody
+    group: nobody
+    mode: '0777' 
+
+# 3. /etc/exports 파일 설정
+- name: Configure NFS export path
+  ansible.builtin.lineinfile:
+    path: /etc/exports
+    # Zulip 서버 IP에 대해 rw (읽기/쓰기) 권한을 부여합니다.
+    line: "{{ nfs_export_path }} {{ zulip_server_ip }}(rw,sync,no_root_squash,no_all_squash)" 
+    state: present
+    create: yes
+
+# 4. NFS 서비스 시작 및 활성화
+- name: Start and enable nfs-server service
+  ansible.builtin.service:
+    name: nfs-server
+    state: started
+    enabled: yes
+
+# 5. 설정 적용 (Exportfs 재로드)
+- name: Reload NFS export configuration
+  ansible.builtin.command: exportfs -r

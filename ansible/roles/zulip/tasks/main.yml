@@ -1,0 +1,139 @@
+---
+# 하드코딩된 변수 설정 (PostgreSQL, NFS 서버 접속 정보 및 경로)
+- name: Set necessary variables for external services
+  ansible.builtin.set_fact:
+    # NFS 설정 변수 (인벤토리에서 동적 참조)
+    nfs_server_ip: "{{ groups['nfs_server'][0] }}"
+    nfs_export_path: "/mnt/zulip_data"
+    zulip_storage_dir: "/opt/zulip/data" 
+    
+    # PostgreSQL 접속 정보 (admin/admin으로 설정)
+    db_user: "admin"
+    db_password: "admin"
+
+
+# --- 1. 필수 패키지 설치 ---
+
+- name: Install prerequisites
+  ansible.builtin.dnf:
+    name:
+      - git
+      - curl
+      - wget
+      - tar
+      - unzip
+      - epel-release
+      - nfs-utils
+    state: present
+  become: true
+
+# WAF 디렉토리 생성 작업은 제거됨
+- name: Create zulip file if does not exist
+  ansible.builtin.file:
+    path: "{{ repo_dir }}"
+    state: directory
+    mode: '0755'
+  become: true
+
+# --- 2. Docker 및 Docker Compose 설치 ---
+
+# 도커 설치
+- name: Install Docker
+  ansible.builtin.shell: |
+    if ! command -v docker >/dev/null 2>&1; then
+      curl -fsSL https://get.docker.com -o /root/get-docker.sh
+      sh /root/get-docker.sh
+    fi
+    systemctl enable --now docker
+  args:
+    executable: /bin/bash
+  become: true
+
+# 도커 컴포즈 플러그인 설치
+- name: Install docker compose plugin
+  ansible.builtin.dnf:
+    name: docker-compose-plugin
+    state: present
+  become: true
+  ignore_errors: true
+
+# --- 3. NFS 마운트 설정 (호스트 서버) ---
+
+- name: Create local mount point for Zulip data on host
+  ansible.builtin.file:
+    path: "{{ zulip_storage_dir }}"
+    state: directory
+    mode: '0755' 
+  become: true
+
+- name: Mount NFS share for Zulip data
+  ansible.posix.mount:
+    src: "{{ nfs_server_ip }}:{{ nfs_export_path }}" 
+    path: "{{ zulip_storage_dir }}"
+    fstype: nfs
+    opts: rw,sync,hard,intr
+    state: mounted
+  become: true
+
+# --- 4. Zulip 소스 및 설정 파일 준비 ---
+
+# zulip 가져오기
+- name: Clone docker-zulip
+  ansible.builtin.git:
+    repo: https://github.com/zulip/docker-zulip.git
+    dest: "{{ repo_dir }}"
+    force: yes
+  become: true
+
+# .env 파일 생성 (외부 DB 설정 포함)
+- name: Write .env (Modified for external services)
+  ansible.builtin.copy:
+    dest: "{{ repo_dir }}/.env"
+    mode: '0666'
+    content: |
+      SETTINGS_FLAVOR=production
+      ZULIP_ADMINISTRATOR="admin@{{ inventory_hostname }}"
+      ZULIP_AUTH_BACKENDS=EmailAuthBackend
+      ZULIP_DOMAIN={{ inventory_hostname }}
+      ZULIP_REALM_NAME="Zulip Chat"
+      SECRETS_email_password="change-me"
+      SETTINGS_EXTERNAL_HOST={{ inventory_hostname }}
+      
+      # 외부 PostgreSQL 설정: 유저와 비밀번호를 'admin'으로 설정
+      EXTERNAL_POSTGRES=True
+      POSTGRES_HOST={{ groups['db_main'][0] }} 
+      POSTGRES_PORT=5432
+      POSTGRES_USER={{ db_user }} 
+      SECRETS_postgres_password={{ db_password }}
+  become: true
+
+# docker-compose.override.yml 파일 생성 (NFS 볼륨 바인딩 포함)
+- name: Write docker-compose.override.yml (Modified for external services)
+  ansible.builtin.copy:
+    dest: "{{ repo_dir }}/docker-compose.override.yml"
+    mode: '0644'
+    content: |
+      version: '3.8'
+      services:
+        zulip:
+          ports:
+            - "80:80"
+            - "443:443"
+          environment:
+            - ZULIP_DOMAIN={{ inventory_hostname }}
+            - SETTINGS_EXTERNAL_HOST={{ inventory_hostname }}
+            - SETTINGS_ALLOWED_HOSTS=["{{ inventory_hostname }}","localhost","127.0.0.1"]
+            
+          # 호스트의 NFS 마운트 경로를 컨테이너 내부의 데이터 경로로 바인딩
+          volumes:
+            - {{ zulip_storage_dir }}:/data:rw
+  become: true
+
+# --- 5. Zulip 스택 시작 ---
+
+- name: Start Zulip stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ repo_dir }}"
+    state: present
+    pull: always
+  become: true
