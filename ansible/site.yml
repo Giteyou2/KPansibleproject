@@ -29,22 +29,7 @@
     - node_exporter
 
 #########################################
-# 3) Setup PostgreSQL (DB Main, Standby)
-#########################################
-- name: Setup PostgreSQL Main Server
-  hosts: db_main
-  become: true
-  roles:
-    - setup_db_main
-
-- name: Setup PostgreSQL Standby Server
-  hosts: db_standby
-  become: true
-  roles:
-    - setup_db_standby
-
-#########################################
-# 4) Setup NFS Server & Client Mount (Zulip 앱 서버보다 먼저 실행)
+# 3) Setup NFS Server & Client Mount (Zulip 앱 서버보다 먼저 실행)
 #########################################
 - name: 1. Configure NFS Server
   hosts: nfs_server
@@ -59,7 +44,7 @@
     - mount_nfs_client # Zulip 서버에 NFS 마운트 완료
 
 ################################
-# 5) Deploy Zulip Application (마지막에 실행)
+# 4) Deploy Zulip Application (마지막에 실행)
 ################################
 - name: Deploy Zulip Application
   hosts: zulip
