@@ -6,11 +6,9 @@
     nfs_server_ip: "{{ groups['nfs_server'][0] }}"
     nfs_export_path: "/mnt/zulip_data"
     zulip_storage_dir: "/opt/zulip/data"
-    
     # 📌 DB 접속 정보 변수 (내부 DB 사용 시 불필요하므로 제거해도 되지만, 여기서는 주석 처리)
     # db_user: "admin"
     # db_password: "admin"
-
 
 # --- 1. 필수 패키지 설치 ---
 
