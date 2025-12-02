@@ -59,7 +59,7 @@
 # 5) Setup Load Balancer (마지막에 실행)
 ################################
 - name: Deploy Load Balancer (LB) on 172.16.6.55
-  hosts: lb_servers
+  hosts: lb
   become: true
   roles:
     - lb_setup

@@ -2,41 +2,84 @@
 # roles/lb_setup/tasks/main.yml
 
 # ==================================
-# 💡 1. Vars (변수 설정)
+# 1) Vars
 # ==================================
 - name: Set Load Balancer configuration variables
   ansible.builtin.set_fact:
     ssl_cert_path: "/etc/nginx/ssl/zulip-lb.crt"
     ssl_key_path: "/etc/nginx/ssl/zulip-lb.key"
-    lb_common_name: "172.16.6.55" # LB 서버의 SSL Common Name
+    lb_common_name: "172.16.6.55"
     zulip_backends:
       - 172.16.6.52
       - 172.16.6.54
 
 # ==================================
-# 💡 2. Tasks (작업 정의)
+# 2) WAF + LB 설치
 # ==================================
 
+# 0) Enable required repos
+- name: 0. Enable CRB & install EPEL
+  ansible.builtin.shell: |
+    dnf config-manager --set-enabled crb
+    dnf install -y epel-release
+
 # 1) Install packages
-- name: 1. Install nginx, openssl, and ModSecurity WAF packages
+- name: 1. Install nginx, openssl, libmodsecurity, connector build deps
   ansible.builtin.dnf:
     name:
       - nginx
       - openssl
-      - modsecurity
-      - nginx-mod-http-modsecurity
+      - mod_security
+      - mod_security-owasp-crs
+      - wget
+      - unzip
+      - git
+      - gcc
+      - make
+      - automake
+      - autoconf
+      - libtool
+      - pkgconfig
+      - zlib-devel
+      - pcre-devel
     state: present
 
-# 2) Create SSL directory
-- name: 2. Create SSL directory
+# 2) Download ModSecurity-nginx connector
+- name: 2. Download ModSecurity-nginx connector
+  ansible.builtin.git:
+    repo: "https://github.com/SpiderLabs/ModSecurity-nginx.git"
+    dest: "/opt/ModSecurity-nginx"
+    version: master
+
+# 3) Enable ModSecurity
+- name: 3. Enable ModSecurity default config
+  ansible.builtin.copy:
+    src: "/usr/share/mod_security/modsecurity.conf-recommended"
+    dest: "/etc/nginx/modsecurity.conf"
+    remote_src: yes
+
+- name: 4. Enable ModSecurity rules directory
+  ansible.builtin.file:
+    path: "/etc/nginx/modsec_rules"
+    state: directory
+    mode: '0755'
+
+- name: 5. Copy OWASP CRS rules
+  ansible.builtin.shell: |
+    cp -R /usr/share/mod_security/* /etc/nginx/modsec_rules/
+    cp -R /usr/share/mod_security/owasp-crs/rules/* /etc/nginx/modsec_rules/
+
+# ==================================
+# SSL 생성
+# ==================================
+- name: Create SSL directory
   ansible.builtin.file:
     path: "/etc/nginx/ssl"
     state: directory
     mode: '0755'
 
-# 3) Generate SSL certificates (self-signed)
-- name: 3. Generate self-signed SSL certificate
-  community.crypto.x509_certificate:  # ⬅️ 이 부분을 수정했습니다.
+- name: Generate self-signed SSL certificate
+  community.crypto.x509_certificate:
     path: "{{ ssl_cert_path }}"
     privatekey_path: "{{ ssl_key_path }}"
     common_name: "{{ lb_common_name }}"
@@ -44,43 +87,19 @@
   tags:
     - ssl_cert
 
-# 4) Configure ModSecurity Base Rules
-- name: 4. Configure ModSecurity basic setup
-  block:
-    - name: Ensure ModSecurity main config file is present
-      ansible.builtin.template:
-        src: "modsecurity.conf.j2"
-        dest: "/etc/nginx/modsecurity.conf"
-        mode: '0644'
-
-    - name: Create directory for OWASP CRS rules (Placeholder)
-      ansible.builtin.file:
-        path: "/etc/nginx/modsec_rules"
-        state: directory
-        mode: '0755'
-
-    - name: Copy OWASP CRS include file (placeholder)
-      ansible.builtin.copy:
-        content: |
-          # ModSecurity OWASP CRS include list (PLACEHOLDER)
-          # Note: Actual CRS files should be copied to /etc/nginx/modsec_rules/
-          # Include /etc/nginx/modsec_rules/*.conf
-        dest: "/etc/nginx/modsec_crs_include.conf"
-        mode: '0644'
-  tags:
-    - waf
-
-# 5) Copy nginx configuration for SSL (reverse proxy setup)
-- name: 5. Copy nginx configuration for SSL (reverse proxy setup)
+# ==================================
+# Nginx 설정
+# ==================================
+- name: Deploy nginx SSL reverse proxy config with ModSecurity enabled
   ansible.builtin.template:
-    src: "nginx_ssl.conf.j2"
+    src: "nginx_ssl_modsec.conf.j2"
     dest: "/etc/nginx/conf.d/zulip_ssl.conf"
     mode: '0644'
   notify:
     - restart nginx
 
-# 6) Enable and start nginx
-- name: 6. Enable and start nginx
+#  Start nginx
+- name: Enable and start nginx
   ansible.builtin.systemd:
     name: nginx
     state: started
