@@ -1,0 +1,87 @@
+---
+# roles/lb_setup/tasks/main.yml
+
+# ==================================
+# 💡 1. Vars (변수 설정)
+# ==================================
+- name: Set Load Balancer configuration variables
+  ansible.builtin.set_fact:
+    ssl_cert_path: "/etc/nginx/ssl/zulip-lb.crt"
+    ssl_key_path: "/etc/nginx/ssl/zulip-lb.key"
+    lb_common_name: "172.16.6.55" # LB 서버의 SSL Common Name
+    zulip_backends:
+      - 172.16.6.52
+      - 172.16.6.54
+
+# ==================================
+# 💡 2. Tasks (작업 정의)
+# ==================================
+
+# 1) Install packages
+- name: 1. Install nginx, openssl, and ModSecurity WAF packages
+  ansible.builtin.dnf:
+    name:
+      - nginx
+      - openssl
+      - modsecurity
+      - nginx-mod-http-modsecurity
+    state: present
+
+# 2) Create SSL directory
+- name: 2. Create SSL directory
+  ansible.builtin.file:
+    path: "/etc/nginx/ssl"
+    state: directory
+    mode: '0755'
+
+# 3) Generate SSL certificates (self-signed)
+- name: 3. Generate self-signed SSL certificate
+  community.crypto.x509_certificate:  # ⬅️ 이 부분을 수정했습니다.
+    path: "{{ ssl_cert_path }}"
+    privatekey_path: "{{ ssl_key_path }}"
+    common_name: "{{ lb_common_name }}"
+    state: present
+  tags:
+    - ssl_cert
+
+# 4) Configure ModSecurity Base Rules
+- name: 4. Configure ModSecurity basic setup
+  block:
+    - name: Ensure ModSecurity main config file is present
+      ansible.builtin.template:
+        src: "modsecurity.conf.j2"
+        dest: "/etc/nginx/modsecurity.conf"
+        mode: '0644'
+
+    - name: Create directory for OWASP CRS rules (Placeholder)
+      ansible.builtin.file:
+        path: "/etc/nginx/modsec_rules"
+        state: directory
+        mode: '0755'
+
+    - name: Copy OWASP CRS include file (placeholder)
+      ansible.builtin.copy:
+        content: |
+          # ModSecurity OWASP CRS include list (PLACEHOLDER)
+          # Note: Actual CRS files should be copied to /etc/nginx/modsec_rules/
+          # Include /etc/nginx/modsec_rules/*.conf
+        dest: "/etc/nginx/modsec_crs_include.conf"
+        mode: '0644'
+  tags:
+    - waf
+
+# 5) Copy nginx configuration for SSL (reverse proxy setup)
+- name: 5. Copy nginx configuration for SSL (reverse proxy setup)
+  ansible.builtin.template:
+    src: "nginx_ssl.conf.j2"
+    dest: "/etc/nginx/conf.d/zulip_ssl.conf"
+    mode: '0644'
+  notify:
+    - restart nginx
+
+# 6) Enable and start nginx
+- name: 6. Enable and start nginx
+  ansible.builtin.systemd:
+    name: nginx
+    state: started
+    enabled: true

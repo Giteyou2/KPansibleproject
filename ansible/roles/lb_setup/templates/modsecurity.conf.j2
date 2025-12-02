@@ -1,0 +1,22 @@
+# roles/lb_setup/templates/modsecurity.conf.j2
+# 
+# ModSecurity 기본 설정 파일
+
+# ModSecurity 엔진을 활성화 (DetectionOnly: 탐지 모드, On: 차단 모드)
+SecRuleEngine DetectionOnly
+
+# ModSecurity 로그 파일 경로 설정
+SecAuditEngine On
+SecAuditLogParts ABIFHZ
+SecAuditLog /var/log/modsec_audit.log
+
+# 에러 로그는 Nginx 에러 로그를 사용
+SecDebugLog /var/log/modsec_debug.log
+SecDebugLogLevel 0
+
+# JSON/XML 본문 파싱 활성화
+SecRequestBodyAccess On
+SecResponseBodyAccess Off
+
+# 최대 요청 본문 크기 설정
+SecRequestBodyLimit 13107200

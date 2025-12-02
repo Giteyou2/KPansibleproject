@@ -44,7 +44,7 @@
     - mount_nfs_client # Zulip 서버에 NFS 마운트 완료
 
 ################################
-# 4) Deploy Zulip Application (마지막에 실행)
+# 4) Deploy Zulip Application (LB 설치 직전 실행)
 ################################
 - name: Deploy Zulip Application
   hosts: zulip
@@ -54,3 +54,13 @@
   # WAF 관련 변수는 더 이상 Zulip Role에 필요하지 않으므로 제거했습니다.
   roles:
     - zulip # NFS 마운트가 완료된 후 Zulip 스택 시작
+
+################################
+# 5) Setup Load Balancer (마지막에 실행)
+################################
+- name: Deploy Load Balancer (LB) on 172.16.6.55
+  hosts: lb_servers
+  become: true
+  roles:
+    - lb_setup
+
