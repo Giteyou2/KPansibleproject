@@ -1,5 +1,4 @@
 ---
-# roles/lb_setup/handlers/main.yml
 - name: restart nginx
   ansible.builtin.systemd:
     name: nginx

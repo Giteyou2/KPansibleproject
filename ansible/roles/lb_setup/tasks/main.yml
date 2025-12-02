@@ -6,100 +6,33 @@
 # ==================================
 - name: Set Load Balancer configuration variables
   ansible.builtin.set_fact:
-    ssl_cert_path: "/etc/nginx/ssl/zulip-lb.crt"
-    ssl_key_path: "/etc/nginx/ssl/zulip-lb.key"
-    lb_common_name: "172.16.6.55"
     zulip_backends:
       - 172.16.6.52
       - 172.16.6.54
 
 # ==================================
-# 2) WAF + LB 설치
+# 2) Install nginx
 # ==================================
-
-# 0) Enable required repos
-- name: 0. Enable CRB & install EPEL
-  ansible.builtin.shell: |
-    dnf config-manager --set-enabled crb
-    dnf install -y epel-release
-
-# 1) Install packages
-- name: 1. Install nginx, openssl, libmodsecurity, connector build deps
+- name: Install nginx
   ansible.builtin.dnf:
-    name:
-      - nginx
-      - openssl
-      - mod_security
-      - mod_security-owasp-crs
-      - wget
-      - unzip
-      - git
-      - gcc
-      - make
-      - automake
-      - autoconf
-      - libtool
-      - pkgconfig
-      - zlib-devel
-      - pcre-devel
+    name: nginx
     state: present
 
-# 2) Download ModSecurity-nginx connector
-- name: 2. Download ModSecurity-nginx connector
-  ansible.builtin.git:
-    repo: "https://github.com/SpiderLabs/ModSecurity-nginx.git"
-    dest: "/opt/ModSecurity-nginx"
-    version: master
-
-# 3) Enable ModSecurity
-- name: 3. Enable ModSecurity default config
-  ansible.builtin.copy:
-    src: "/usr/share/mod_security/modsecurity.conf-recommended"
-    dest: "/etc/nginx/modsecurity.conf"
-    remote_src: yes
-
-- name: 4. Enable ModSecurity rules directory
-  ansible.builtin.file:
-    path: "/etc/nginx/modsec_rules"
-    state: directory
-    mode: '0755'
-
-- name: 5. Copy OWASP CRS rules
-  ansible.builtin.shell: |
-    cp -R /usr/share/mod_security/* /etc/nginx/modsec_rules/
-    cp -R /usr/share/mod_security/owasp-crs/rules/* /etc/nginx/modsec_rules/
-
 # ==================================
-# SSL 생성
+# 3) Deploy nginx load balancer config (HTTP only)
 # ==================================
-- name: Create SSL directory
-  ansible.builtin.file:
-    path: "/etc/nginx/ssl"
-    state: directory
-    mode: '0755'
-
-- name: Generate self-signed SSL certificate
-  community.crypto.x509_certificate:
-    path: "{{ ssl_cert_path }}"
-    privatekey_path: "{{ ssl_key_path }}"
-    common_name: "{{ lb_common_name }}"
-    state: present
-  tags:
-    - ssl_cert
-
-# ==================================
-# Nginx 설정
-# ==================================
-- name: Deploy nginx SSL reverse proxy config with ModSecurity enabled
+- name: Deploy nginx HTTP reverse proxy config
   ansible.builtin.template:
-    src: "nginx_ssl_modsec.conf.j2"
-    dest: "/etc/nginx/conf.d/zulip_ssl.conf"
+    src: "nginx_lb_http.conf.j2"
+    dest: "/etc/nginx/conf.d/zulip_lb.conf"
     mode: '0644'
   notify:
     - restart nginx
 
-#  Start nginx
-- name: Enable and start nginx
+# ==================================
+# 4) Start and enable nginx
+# ==================================
+- name: Start and enable nginx
   ansible.builtin.systemd:
     name: nginx
     state: started
